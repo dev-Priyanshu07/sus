@@ -1,0 +1,4 @@
+data.drop(columns=['EMA_12', 'EMA_26', '20_SMA', '20_STD'], inplace=True)
+
+# Save the updated DataFrame to a CSV file
+data.to_csv('stock_data_with_indicators.csv')
