@@ -1,0 +1,62 @@
+Let's break down the code:
+
+### 1. Importing Libraries
+
+```python
+import asyncio
+import websockets
+import json
+from kafka import KafkaProducer
+```
+
+- `asyncio`: Asynchronous I/O framework in Python for concurrent code execution.
+- `websockets`: Library for implementing WebSocket servers and clients.
+- `json`: Library for working with JSON data.
+- `KafkaProducer`: Class from the `kafka-python` library used to produce messages to Kafka topics.
+
+### 2. Initialize Kafka Producer
+
+```python
+producer = KafkaProducer(
+    bootstrap_servers='localhost:9092',
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+```
+
+- Initializes a Kafka producer instance.
+- `bootstrap_servers`: Specifies the Kafka broker addresses to bootstrap the initial connection.
+- `value_serializer`: Function used to serialize values before sending them to Kafka. Here, it's a lambda function that serializes data to JSON format and encodes it to UTF-8 bytes.
+
+### 3. Define WebSocket Handler Function
+
+```python
+async def handle_websocket(websocket, path):
+    async for message in websocket:
+        data = json.loads(message)
+        # Assuming data contains stock information
+        company = data['company']
+        producer.send(f'stock_data_{company}', data)
+        producer.flush()
+```
+
+- Defines an asynchronous function `handle_websocket` that handles WebSocket connections.
+- `websocket`: Represents the WebSocket connection.
+- `path`: Represents the request path of the WebSocket connection (not used in this example).
+- Uses an asynchronous for loop to receive messages from the WebSocket client.
+- Parses the received JSON message using `json.loads`.
+- Extracts the company name from the received data.
+- Sends the data to a Kafka topic named `stock_data_{company}` using the Kafka producer.
+- Flushes the producer to ensure messages are sent immediately.
+
+### 4. Start WebSocket Server
+
+```python
+start_server = websockets.serve(handle_websocket, "localhost", 8765)
+```
+
+- Creates a WebSocket server listening on localhost (`"localhost"`) and port `8765`.
+- Associates the `handle_websocket` function with the server to handle incoming WebSocket connections.
+
+### Summary
+
+This code sets up a WebSocket server using the `websockets` library, listens for incoming messages from WebSocket clients, parses the JSON messages, and sends them to corresponding Kafka topics using a Kafka producer instance. It's a basic example of how to integrate WebSocket communication with Kafka message processing in Python.
