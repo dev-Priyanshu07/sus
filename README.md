@@ -1,118 +1,98 @@
-To achieve this, we can set up an inter-process communication (IPC) mechanism to send the supertrend values calculated in `supertrend.py` to `strategy.py`. There are several ways to do this, such as using sockets, shared memory, or message queues. For simplicity and robustness, we'll use a basic socket communication approach, which should work well given your existing use of sockets.
+Sure! Let's walk through the implementation step-by-step, assuming you have a CSV file containing historical stock data with columns for different technical indicators.
 
-Here's a step-by-step outline of how to set this up:
+### Steps to Implement an ANN for Stock Prediction with CSV Data
 
-1. **Modify `supertrend.py` to send supertrend values via a socket:**
-    - Create a client socket in `supertrend.py`.
-    - Connect this socket to a server socket in `strategy.py`.
-    - Send the calculated supertrend values through this socket.
+1. **Load the CSV Data**: Read the CSV file into a pandas DataFrame.
+2. **Data Preprocessing**: Normalize the data and create input features and target labels.
+3. **Building the ANN**: Define and compile the neural network.
+4. **Training the ANN**: Train the model on historical data.
+5. **Evaluation and Prediction**: Evaluate the model performance and use it to make predictions.
 
-2. **Set up `strategy.py` to receive supertrend values:**
-    - Create a server socket in `strategy.py`.
-    - Listen for incoming connections and receive supertrend values.
-    - Process these values to generate buy or sell signals.
+### Example Implementation
 
-### `supertrend.py`
-
-Here's how you might modify `supertrend.py`:
+#### 1. Load the CSV Data
 
 ```python
-import socket
-import json
-import time
+import pandas as pd
 
-def calculate_supertrend(data):
-    # Dummy implementation; replace with actual calculation
-    supertrend_value = sum(data) / len(data)
-    return supertrend_value
+# Load the CSV file
+csv_file_path = 'path/to/your/stock_data.csv'
+stock_data = pd.read_csv(csv_file_path)
 
-def send_supertrend_to_strategy(supertrend_value):
-    try:
-        # Create a socket object
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Define the port and host
-        host = 'localhost'
-        port = 12345
-        # Connect to the server
-        s.connect((host, port))
-        # Send the supertrend value
-        message = json.dumps({'supertrend': supertrend_value})
-        s.sendall(message.encode('utf-8'))
-        # Close the connection
-        s.close()
-    except Exception as e:
-        print(f"Error sending data: {e}")
+# Assuming the CSV has columns: Date, Open, High, Low, Close, Volume, SMA, RSI, MACD
+# Drop rows with missing values
+stock_data = stock_data.dropna()
 
-def main():
-    while True:
-        # Replace with the actual method to receive data
-        data = [1, 2, 3, 4, 5]  # Dummy data
-        supertrend_value = calculate_supertrend(data)
-        send_supertrend_to_strategy(supertrend_value)
-        time.sleep(5)  # Simulate regular interval
-
-if __name__ == "__main__":
-    main()
+# Display the first few rows of the data
+print(stock_data.head())
 ```
 
-### `strategy.py`
-
-Here's how you might set up `strategy.py`:
+#### 2. Data Preprocessing
 
 ```python
-import socket
-import json
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
-def process_supertrend(supertrend_value):
-    # Dummy strategy; replace with actual strategy logic
-    if supertrend_value > 50:
-        return "buy"
-    else:
-        return "sell"
+# Define the features and target
+features = ['SMA', 'RSI', 'MACD']
+target = 'Close'
 
-def main():
-    # Create a socket object
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Define the port and host
-    host = 'localhost'
-    port = 12345
-    # Bind the socket to the port
-    server_socket.bind((host, port))
-    # Listen for incoming connections
-    server_socket.listen(5)
+# Normalize the features
+scaler = StandardScaler()
+X = scaler.fit_transform(stock_data[features])
 
-    print("Strategy server listening on port", port)
+# Define the target: Buy (1) if the next day's close price is higher than today, else Sell (0)
+y = (stock_data['Close'].shift(-1) > stock_data['Close']).astype(int).values[:-1]
+X = X[:-1]  # Remove last row to match y
 
-    while True:
-        # Accept a connection
-        client_socket, addr = server_socket.accept()
-        print("Got connection from", addr)
-        try:
-            # Receive data from the client
-            data = client_socket.recv(1024)
-            if not data:
-                break
-            message = data.decode('utf-8')
-            supertrend_value = json.loads(message)['supertrend']
-            signal = process_supertrend(supertrend_value)
-            print(f"Supertrend: {supertrend_value}, Signal: {signal}")
-        except Exception as e:
-            print(f"Error receiving data: {e}")
-        finally:
-            client_socket.close()
-
-if __name__ == "__main__":
-    main()
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 ```
 
-### Explanation:
+#### 3. Building the ANN
 
-1. **`supertrend.py`**:
-    - A client socket is created to connect to `strategy.py`.
-    - The calculated supertrend value is serialized to JSON and sent over the socket.
+```python
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
 
-2. **`strategy.py`**:
-    - A server socket is created to listen for incoming connections.
-    - When a connection is accepted, the supertrend value is received, deserialized, and processed to determine a buy or sell signal.
+# Build the ANN model
+model = Sequential([
+    Dense(64, input_dim=X_train.shape[1], activation='relu'),
+    Dropout(0.2),
+    Dense(32, activation='relu'),
+    Dropout(0.2),
+    Dense(1, activation='sigmoid')
+])
 
-This setup ensures that `strategy.py` can receive and process supertrend values in real-time as they are calculated by `supertrend.py`. Adjust the host and port as necessary for your environment.
+# Compile the model
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+```
+
+#### 4. Training the ANN
+
+```python
+# Train the model
+history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
+```
+
+#### 5. Evaluation and Prediction
+
+```python
+# Evaluate the model
+loss, accuracy = model.evaluate(X_test, y_test)
+print(f"Test Accuracy: {accuracy:.2f}")
+
+# Make predictions
+predictions = model.predict(X_test)
+predictions = (predictions > 0.5).astype(int)
+
+# Example: Predict the buy/sell signal for new data
+new_data = scaler.transform([[sma_value, rsi_value, macd_value]])
+signal = model.predict(new_data)
+signal = 'Buy' if signal > 0.5 else 'Sell'
+print(f"Signal: {signal}")
+```
+
+### Summary
+This example demonstrates how to implement an ANN for stock prediction using technical indicators from a CSV file. Make sure your CSV file has the required columns and is preprocessed appropriately. You can enhance the model by adding more features, tuning hyperparameters, and using more advanced neural network architectures.
