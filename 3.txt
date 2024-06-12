@@ -1,0 +1,141 @@
+To adapt the workflow to receive real-time data through a socket, you'll need to set up a socket connection that listens for incoming data, processes the data to compute technical indicators, and then uses the ANN model to make predictions. Below is a step-by-step guide to achieve this.
+
+### Workflow for Real-Time Data through Socket
+
+1. **Set Up Socket Server:**
+   - Create a server that listens for incoming real-time stock data.
+
+2. **Process Incoming Data:**
+   - Receive the data, compute technical indicators, and preprocess it for the model.
+
+3. **Predict Using ANN:**
+   - Use the preprocessed data to make predictions with the trained ANN model.
+
+### Step-by-Step Guide
+
+#### 1. Set Up Socket Server
+
+First, create a simple socket server to receive real-time data. This example assumes the incoming data includes stock prices and other relevant information.
+
+**`server.py`:**
+
+```python
+import socket
+import json
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import load_model
+from rsi import calculate_rsi
+from macd import calculate_macd
+from bollinger_bands import calculate_bollinger_bands
+
+# Load the trained model
+model = load_model('stock_prediction_ann_model.h5')
+
+# Initialize socket
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+host = 'localhost'
+port = 5000
+server_socket.bind((host, port))
+server_socket.listen(5)
+
+# Initialize MinMaxScaler (assuming it's already fit to the training data)
+scaler = MinMaxScaler(feature_range=(0, 1))
+
+# Function to add technical indicators
+def add_technical_indicators(data):
+    data['RSI'] = calculate_rsi(data)
+    data['MACD'] = calculate_macd(data)
+    data['BB_upper'], data['BB_lower'] = calculate_bollinger_bands(data)
+    return data
+
+print('Server listening on port', port)
+
+while True:
+    client_socket, addr = server_socket.accept()
+    print('Got connection from', addr)
+    
+    while True:
+        data = client_socket.recv(1024)
+        if not data:
+            break
+        
+        # Assume data comes in JSON format
+        real_time_data = json.loads(data.decode('utf-8'))
+        real_time_df = pd.DataFrame(real_time_data)
+        
+        # Add technical indicators
+        real_time_df = add_technical_indicators(real_time_df)
+        
+        # Drop rows with NaN values
+        real_time_df.dropna(inplace=True)
+        
+        # Scale real-time data
+        scaled_real_time_data = scaler.transform(real_time_df[['Close', 'RSI', 'MACD', 'BB_upper', 'BB_lower']])
+        
+        # Make predictions
+        predictions = model.predict(scaled_real_time_data)
+        predictions = scaler.inverse_transform(predictions)
+        
+        # Send predictions back to client
+        client_socket.send(json.dumps(predictions.tolist()).encode('utf-8'))
+    
+    client_socket.close()
+```
+
+#### 2. Client to Send Real-Time Data
+
+**`client.py`:**
+
+```python
+import socket
+import json
+import yfinance as yf
+import time
+
+# Initialize socket
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+host = 'localhost'
+port = 5000
+client_socket.connect((host, port))
+
+# Function to fetch real-time stock data
+def get_real_time_data(stock_symbol, interval='1m'):
+    end_time = pd.Timestamp.now()
+    start_time = end_time - pd.Timedelta(days=1)
+    real_time_data = yf.download(tickers=stock_symbol, start=start_time, end=end_time, interval=interval)
+    return real_time_data.reset_index().to_dict(orient='records')
+
+while True:
+    real_time_data = get_real_time_data('AAPL')
+    client_socket.send(json.dumps(real_time_data).encode('utf-8'))
+    
+    # Receive predictions from server
+    data = client_socket.recv(1024)
+    predictions = json.loads(data.decode('utf-8'))
+    print('Predictions:', predictions)
+    
+    time.sleep(60)  # Wait for 1 minute before fetching new data
+```
+
+### Explanation
+
+1. **Server Setup (`server.py`):**
+   - Initializes a socket server to listen for incoming connections.
+   - When a connection is established, it continuously listens for data.
+   - Upon receiving data, it processes it to calculate technical indicators, scales it, and makes predictions using the ANN model.
+   - Sends predictions back to the client.
+
+2. **Client Setup (`client.py`):**
+   - Connects to the server and periodically fetches real-time stock data using yfinance.
+   - Sends the data to the server in JSON format.
+   - Receives predictions from the server and prints them.
+
+### Considerations
+
+- **Error Handling:** Implement proper error handling for network issues and data processing errors.
+- **Data Format:** Ensure the data format sent and received over the socket is consistent.
+- **Scalability:** For a production system, consider using more robust methods for real-time data streaming, such as Kafka or WebSocket.
+
+This setup provides a basic framework for real-time stock prediction using socket communication and an ANN model with technical indicators.
