@@ -1,98 +1,114 @@
-Sure! Let's walk through the implementation step-by-step, assuming you have a CSV file containing historical stock data with columns for different technical indicators.
+To generate and send stock data using plain TCP sockets at one-minute intervals, you can use Python's `socket` module. Here's how you can set up a TCP server and client:
 
-### Steps to Implement an ANN for Stock Prediction with CSV Data
+### Server Code
 
-1. **Load the CSV Data**: Read the CSV file into a pandas DataFrame.
-2. **Data Preprocessing**: Normalize the data and create input features and target labels.
-3. **Building the ANN**: Define and compile the neural network.
-4. **Training the ANN**: Train the model on historical data.
-5. **Evaluation and Prediction**: Evaluate the model performance and use it to make predictions.
-
-### Example Implementation
-
-#### 1. Load the CSV Data
+1. **Server to generate stock data and send to clients:**
 
 ```python
-import pandas as pd
+import socket
+import time
+import random
+import datetime
+import json
 
-# Load the CSV file
-csv_file_path = 'path/to/your/stock_data.csv'
-stock_data = pd.read_csv(csv_file_path)
+def generate_stock_data(ticker):
+    """
+    Simulates generating stock data for a given ticker symbol.
+    """
+    open_price = round(random.uniform(100.0, 500.0), 2)
+    close_price = round(open_price + random.uniform(-10.0, 10.0), 2)
+    high_price = round(max(open_price, close_price) + random.uniform(0.0, 5.0), 2)
+    low_price = round(min(open_price, close_price) - random.uniform(0.0, 5.0), 2)
+    volume = random.randint(1000, 10000)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Assuming the CSV has columns: Date, Open, High, Low, Close, Volume, SMA, RSI, MACD
-# Drop rows with missing values
-stock_data = stock_data.dropna()
+    return {
+        "timestamp": timestamp,
+        "ticker": ticker,
+        "open": open_price,
+        "high": high_price,
+        "low": low_price,
+        "close": close_price,
+        "volume": volume
+    }
 
-# Display the first few rows of the data
-print(stock_data.head())
+def start_server(host='localhost', port=65432):
+    """
+    Starts a TCP server to send stock data to connected clients every minute.
+    """
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((host, port))
+    server_socket.listen()
+
+    print(f"Server started at {host}:{port}")
+
+    try:
+        while True:
+            client_socket, addr = server_socket.accept()
+            print(f"Connection from {addr}")
+            try:
+                while True:
+                    stock_data = generate_stock_data("AAPL")
+                    stock_data_json = json.dumps(stock_data)
+                    client_socket.sendall(stock_data_json.encode('utf-8') + b'\n')
+                    time.sleep(60)  # Wait for 1 minute
+            except (ConnectionResetError, BrokenPipeError):
+                print(f"Connection lost with {addr}")
+            finally:
+                client_socket.close()
+    finally:
+        server_socket.close()
+
+if __name__ == "__main__":
+    start_server()
 ```
 
-#### 2. Data Preprocessing
+### Client Code
+
+2. **Client to receive and print stock data:**
 
 ```python
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
+import socket
 
-# Define the features and target
-features = ['SMA', 'RSI', 'MACD']
-target = 'Close'
+def start_client(host='localhost', port=65432):
+    """
+    Starts a TCP client to receive and print stock data from the server.
+    """
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((host, port))
 
-# Normalize the features
-scaler = StandardScaler()
-X = scaler.fit_transform(stock_data[features])
+    try:
+        while True:
+            data = client_socket.recv(1024)
+            if not data:
+                break
+            print(data.decode('utf-8').strip())
+    finally:
+        client_socket.close()
 
-# Define the target: Buy (1) if the next day's close price is higher than today, else Sell (0)
-y = (stock_data['Close'].shift(-1) > stock_data['Close']).astype(int).values[:-1]
-X = X[:-1]  # Remove last row to match y
-
-# Split the data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+if __name__ == "__main__":
+    start_client()
 ```
 
-#### 3. Building the ANN
+### Explanation
 
-```python
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
+- **Server Code**:
+  - **generate_stock_data**: This function generates random stock data.
+  - **start_server**: This function starts a TCP server that listens for client connections. It sends generated stock data every minute to connected clients. If the connection is lost, it handles the exception and continues to listen for new connections.
+  
+- **Client Code**:
+  - **start_client**: This function connects to the server and receives stock data. It prints the received data to the console.
 
-# Build the ANN model
-model = Sequential([
-    Dense(64, input_dim=X_train.shape[1], activation='relu'),
-    Dropout(0.2),
-    Dense(32, activation='relu'),
-    Dropout(0.2),
-    Dense(1, activation='sigmoid')
-])
+### Running the Server and Client
 
-# Compile the model
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-```
+1. **Run the server**:
+   ```bash
+   python server.py
+   ```
 
-#### 4. Training the ANN
+2. **Run the client**:
+   ```bash
+   python client.py
+   ```
 
-```python
-# Train the model
-history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
-```
-
-#### 5. Evaluation and Prediction
-
-```python
-# Evaluate the model
-loss, accuracy = model.evaluate(X_test, y_test)
-print(f"Test Accuracy: {accuracy:.2f}")
-
-# Make predictions
-predictions = model.predict(X_test)
-predictions = (predictions > 0.5).astype(int)
-
-# Example: Predict the buy/sell signal for new data
-new_data = scaler.transform([[sma_value, rsi_value, macd_value]])
-signal = model.predict(new_data)
-signal = 'Buy' if signal > 0.5 else 'Sell'
-print(f"Signal: {signal}")
-```
-
-### Summary
-This example demonstrates how to implement an ANN for stock prediction using technical indicators from a CSV file. Make sure your CSV file has the required columns and is preprocessed appropriately. You can enhance the model by adding more features, tuning hyperparameters, and using more advanced neural network architectures.
+This setup allows you to generate and send stock data at one-minute intervals using plain TCP sockets. The client receives and prints the stock data from the server.
