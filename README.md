@@ -1,11 +1,11 @@
-Sure, let's modify the approach to use a simple Artificial Neural Network (ANN) instead of an LSTM. We'll use a feedforward neural network with fully connected layers. Here's the complete code:
+Certainly! Here’s how you can modify the code to avoid converting data into numpy arrays and instead work directly with Pandas DataFrames.
 
 ### Step 1: Install Necessary Libraries
 
 Ensure the required libraries are installed:
 
 ```bash
-pip install numpy pandas matplotlib tensorflow yfinance scikit-learn
+pip install numpy pandas matplotlib tensorflow scikit-learn
 ```
 
 ### Step 2: Import Libraries
@@ -14,63 +14,54 @@ pip install numpy pandas matplotlib tensorflow yfinance scikit-learn
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import yfinance as yf
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
 ```
 
-### Step 3: Download Historical Stock Data
+### Step 3: Load Data from CSV
+
+Assume your CSV file is named `stock_data.csv` and has a column `Close` for the closing prices.
 
 ```python
-# Download historical data for a stock (e.g., Apple Inc.)
-ticker = 'AAPL'
-data = yf.download(ticker, start='2010-01-01', end='2023-01-01')
+# Load the data
+data = pd.read_csv('stock_data.csv')
+
+# Ensure the 'Date' column is parsed as datetime (if present) and set as the index
+if 'Date' in data.columns:
+    data['Date'] = pd.to_datetime(data['Date'])
+    data.set_index('Date', inplace=True)
+
+# Select the 'Close' price column
+data = data[['Close']]
 ```
 
 ### Step 4: Data Preprocessing
 
 ```python
-# Select the 'Close' price column
-data = data[['Close']]
-
-# Convert the dataframe to a numpy array
-dataset = data.values
-
-# Get the number of rows to train the model on
-training_data_len = int(np.ceil(len(dataset) * .95))
-
 # Scale the data
 scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(dataset)
+data['Close'] = scaler.fit_transform(data[['Close']])
 
-# Create the training data set
-train_data = scaled_data[0:int(training_data_len), :]
+# Create the training and test datasets
+train_data = data.iloc[:int(len(data) * 0.95)]
+test_data = data.iloc[int(len(data) * 0.95):]
 
-# Create the test data set
-test_data = scaled_data[training_data_len:, :]
-
-# Split the data into x_train and y_train data sets
-x_train = []
-y_train = []
-
+# Create x_train and y_train
+x_train, y_train = [], []
 for i in range(60, len(train_data)):
-    x_train.append(train_data[i-60:i, 0])
-    y_train.append(train_data[i, 0])
+    x_train.append(train_data['Close'].iloc[i-60:i].values)
+    y_train.append(train_data['Close'].iloc[i])
 
-# Convert x_train and y_train to numpy arrays
-x_train, y_train = np.array(x_train), np.array(y_train)
+x_train, y_train = pd.DataFrame(x_train), pd.Series(y_train)
 
-# Split the data into x_test and y_test data sets
-x_test = []
-y_test = dataset[training_data_len:, :]
-
+# Create x_test and y_test
+x_test, y_test = [], []
 for i in range(60, len(test_data)):
-    x_test.append(test_data[i-60:i, 0])
+    x_test.append(test_data['Close'].iloc[i-60:i].values)
+    y_test.append(test_data['Close'].iloc[i])
 
-# Convert x_test to numpy array
-x_test = np.array(x_test)
+x_test, y_test = pd.DataFrame(x_test), pd.Series(y_test)
 ```
 
 ### Step 5: Build the ANN Model
@@ -95,15 +86,15 @@ model.fit(x_train, y_train, batch_size=1, epochs=10)
 ```python
 # Get the model's predicted price values
 predictions = model.predict(x_test)
-predictions = scaler.inverse_transform(predictions.reshape(-1, 1))
+predictions = scaler.inverse_transform(predictions)
 ```
 
 ### Step 7: Visualize the Results
 
 ```python
 # Create a dataframe for visualization
-train = data[:training_data_len]
-valid = data[training_data_len:]
+train = data[:int(len(data) * 0.95)]
+valid = data[int(len(data) * 0.95):]
 valid['Predictions'] = predictions
 
 # Visualize the data
@@ -111,9 +102,10 @@ plt.figure(figsize=(16,8))
 plt.title('Model')
 plt.xlabel('Date')
 plt.ylabel('Close Price USD ($)')
-plt.plot(train['Close'])
-plt.plot(valid[['Close', 'Predictions']])
-plt.legend(['Train', 'Val', 'Predictions'], loc='lower right')
+plt.plot(train['Close'], label='Train')
+plt.plot(valid['Close'], label='Val')
+plt.plot(valid['Predictions'], label='Predictions')
+plt.legend(loc='lower right')
 plt.show()
 ```
 
@@ -123,7 +115,7 @@ To predict the next 10 days, we need to extend the model slightly:
 
 ```python
 # Get the last 60 days of the closing price
-last_60_days = data[-60:].values
+last_60_days = data['Close'].iloc[-60:].values.reshape(-1, 1)
 
 # Scale the data
 last_60_days_scaled = scaler.transform(last_60_days)
@@ -133,8 +125,7 @@ predicted_prices = []
 
 # Predict the next 10 days
 for _ in range(10):
-    X_test = np.array([last_60_days_scaled])
-    X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1]))
+    X_test = pd.DataFrame(last_60_days_scaled).transpose()
     
     # Get the predicted scaled price
     pred_price = model.predict(X_test)
@@ -145,7 +136,7 @@ for _ in range(10):
     
     # Append the predicted price to the last_60_days_scaled array
     last_60_days_scaled = np.append(last_60_days_scaled, pred_price, axis=0)
-    last_60_days_scaled = last_60_days_scaled[1:]
+    last_60_days_scaled = last_60_days_scaled[1:].reshape(-1, 1)
 
 # Print the predicted prices for the next 10 days
 print("Predicted prices for the next 10 days:")
@@ -153,4 +144,4 @@ for i, price in enumerate(predicted_prices, 1):
     print(f"Day {i}: {price}")
 ```
 
-This code provides a complete implementation for predicting stock prices using a feedforward ANN model. Adjust the epochs, batch size, and other hyperparameters as needed for better results.
+This code avoids converting data into numpy arrays and uses Pandas DataFrames directly for preprocessing and prediction. Adjust the epochs, batch size, and other hyperparameters as needed for better results.
