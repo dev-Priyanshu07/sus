@@ -1,114 +1,156 @@
-To generate and send stock data using plain TCP sockets at one-minute intervals, you can use Python's `socket` module. Here's how you can set up a TCP server and client:
+Sure, let's modify the approach to use a simple Artificial Neural Network (ANN) instead of an LSTM. We'll use a feedforward neural network with fully connected layers. Here's the complete code:
 
-### Server Code
+### Step 1: Install Necessary Libraries
 
-1. **Server to generate stock data and send to clients:**
+Ensure the required libraries are installed:
 
-```python
-import socket
-import time
-import random
-import datetime
-import json
-
-def generate_stock_data(ticker):
-    """
-    Simulates generating stock data for a given ticker symbol.
-    """
-    open_price = round(random.uniform(100.0, 500.0), 2)
-    close_price = round(open_price + random.uniform(-10.0, 10.0), 2)
-    high_price = round(max(open_price, close_price) + random.uniform(0.0, 5.0), 2)
-    low_price = round(min(open_price, close_price) - random.uniform(0.0, 5.0), 2)
-    volume = random.randint(1000, 10000)
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    return {
-        "timestamp": timestamp,
-        "ticker": ticker,
-        "open": open_price,
-        "high": high_price,
-        "low": low_price,
-        "close": close_price,
-        "volume": volume
-    }
-
-def start_server(host='localhost', port=65432):
-    """
-    Starts a TCP server to send stock data to connected clients every minute.
-    """
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((host, port))
-    server_socket.listen()
-
-    print(f"Server started at {host}:{port}")
-
-    try:
-        while True:
-            client_socket, addr = server_socket.accept()
-            print(f"Connection from {addr}")
-            try:
-                while True:
-                    stock_data = generate_stock_data("AAPL")
-                    stock_data_json = json.dumps(stock_data)
-                    client_socket.sendall(stock_data_json.encode('utf-8') + b'\n')
-                    time.sleep(60)  # Wait for 1 minute
-            except (ConnectionResetError, BrokenPipeError):
-                print(f"Connection lost with {addr}")
-            finally:
-                client_socket.close()
-    finally:
-        server_socket.close()
-
-if __name__ == "__main__":
-    start_server()
+```bash
+pip install numpy pandas matplotlib tensorflow yfinance scikit-learn
 ```
 
-### Client Code
-
-2. **Client to receive and print stock data:**
+### Step 2: Import Libraries
 
 ```python
-import socket
-
-def start_client(host='localhost', port=65432):
-    """
-    Starts a TCP client to receive and print stock data from the server.
-    """
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((host, port))
-
-    try:
-        while True:
-            data = client_socket.recv(1024)
-            if not data:
-                break
-            print(data.decode('utf-8').strip())
-    finally:
-        client_socket.close()
-
-if __name__ == "__main__":
-    start_client()
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
 ```
 
-### Explanation
+### Step 3: Download Historical Stock Data
 
-- **Server Code**:
-  - **generate_stock_data**: This function generates random stock data.
-  - **start_server**: This function starts a TCP server that listens for client connections. It sends generated stock data every minute to connected clients. If the connection is lost, it handles the exception and continues to listen for new connections.
-  
-- **Client Code**:
-  - **start_client**: This function connects to the server and receives stock data. It prints the received data to the console.
+```python
+# Download historical data for a stock (e.g., Apple Inc.)
+ticker = 'AAPL'
+data = yf.download(ticker, start='2010-01-01', end='2023-01-01')
+```
 
-### Running the Server and Client
+### Step 4: Data Preprocessing
 
-1. **Run the server**:
-   ```bash
-   python server.py
-   ```
+```python
+# Select the 'Close' price column
+data = data[['Close']]
 
-2. **Run the client**:
-   ```bash
-   python client.py
-   ```
+# Convert the dataframe to a numpy array
+dataset = data.values
 
-This setup allows you to generate and send stock data at one-minute intervals using plain TCP sockets. The client receives and prints the stock data from the server.
+# Get the number of rows to train the model on
+training_data_len = int(np.ceil(len(dataset) * .95))
+
+# Scale the data
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(dataset)
+
+# Create the training data set
+train_data = scaled_data[0:int(training_data_len), :]
+
+# Create the test data set
+test_data = scaled_data[training_data_len:, :]
+
+# Split the data into x_train and y_train data sets
+x_train = []
+y_train = []
+
+for i in range(60, len(train_data)):
+    x_train.append(train_data[i-60:i, 0])
+    y_train.append(train_data[i, 0])
+
+# Convert x_train and y_train to numpy arrays
+x_train, y_train = np.array(x_train), np.array(y_train)
+
+# Split the data into x_test and y_test data sets
+x_test = []
+y_test = dataset[training_data_len:, :]
+
+for i in range(60, len(test_data)):
+    x_test.append(test_data[i-60:i, 0])
+
+# Convert x_test to numpy array
+x_test = np.array(x_test)
+```
+
+### Step 5: Build the ANN Model
+
+```python
+# Build the ANN model
+model = Sequential()
+model.add(Dense(units=50, activation='relu', input_shape=(x_train.shape[1],)))
+model.add(Dropout(0.2))
+model.add(Dense(units=25, activation='relu'))
+model.add(Dense(units=1))
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+
+# Train the model
+model.fit(x_train, y_train, batch_size=1, epochs=10)
+```
+
+### Step 6: Make Predictions
+
+```python
+# Get the model's predicted price values
+predictions = model.predict(x_test)
+predictions = scaler.inverse_transform(predictions.reshape(-1, 1))
+```
+
+### Step 7: Visualize the Results
+
+```python
+# Create a dataframe for visualization
+train = data[:training_data_len]
+valid = data[training_data_len:]
+valid['Predictions'] = predictions
+
+# Visualize the data
+plt.figure(figsize=(16,8))
+plt.title('Model')
+plt.xlabel('Date')
+plt.ylabel('Close Price USD ($)')
+plt.plot(train['Close'])
+plt.plot(valid[['Close', 'Predictions']])
+plt.legend(['Train', 'Val', 'Predictions'], loc='lower right')
+plt.show()
+```
+
+### Step 8: Predict the Next 10 Days
+
+To predict the next 10 days, we need to extend the model slightly:
+
+```python
+# Get the last 60 days of the closing price
+last_60_days = data[-60:].values
+
+# Scale the data
+last_60_days_scaled = scaler.transform(last_60_days)
+
+# Create an empty list to store the predicted prices
+predicted_prices = []
+
+# Predict the next 10 days
+for _ in range(10):
+    X_test = np.array([last_60_days_scaled])
+    X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1]))
+    
+    # Get the predicted scaled price
+    pred_price = model.predict(X_test)
+    
+    # Undo the scaling
+    pred_price_unscaled = scaler.inverse_transform(pred_price)
+    predicted_prices.append(pred_price_unscaled[0, 0])
+    
+    # Append the predicted price to the last_60_days_scaled array
+    last_60_days_scaled = np.append(last_60_days_scaled, pred_price, axis=0)
+    last_60_days_scaled = last_60_days_scaled[1:]
+
+# Print the predicted prices for the next 10 days
+print("Predicted prices for the next 10 days:")
+for i, price in enumerate(predicted_prices, 1):
+    print(f"Day {i}: {price}")
+```
+
+This code provides a complete implementation for predicting stock prices using a feedforward ANN model. Adjust the epochs, batch size, and other hyperparameters as needed for better results.
