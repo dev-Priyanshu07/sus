@@ -1,10 +1,64 @@
-To implement a system where an ANN model is trained using historical data and then tested with real-time data received via a TCP socket, you can follow these steps:
+Yes, you can use two machine learning models in synchronization for your stock prediction system. The first model will predict the stock closing prices for the next 10 days, and the second model will determine the uptrend or downtrend based on those predictions. Here’s how you can implement it:
 
-### Step 1: Prepare Historical Data and Train the ANN Model
+1. **Train the first model to predict stock closing prices for the next 10 days.**
+2. **Train the second model to predict uptrend or downtrend based on the 10-day predictions.**
+3. **Set up a server to generate real-time stock data and send it to a client.**
+4. **Set up a client to receive the data, make predictions using both models, and determine the trend.**
 
-#### Training Script (`train_model.py`):
+### Step 1: Train the First Model to Predict Closing Prices
 
-This script will load historical stock data, train an ANN model, and save the model and scaler for future use.
+#### Training Script for First Model (`train_model_prices.py`):
+
+```python
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM
+import pickle
+
+# Load historical stock data
+data = pd.read_csv('historical_stock_data.csv')
+
+# Assuming the CSV has columns: 'open', 'high', 'low', 'close', 'volume'
+X = data[['open', 'high', 'low', 'volume']].values
+y = data['close'].values
+
+# Prepare the dataset for LSTM
+def create_dataset(X, y, time_steps=10):
+    Xs, ys = [], []
+    for i in range(len(X) - time_steps):
+        Xs.append(X[i:(i + time_steps)])
+        ys.append(y[i + time_steps])
+    return np.array(Xs), np.array(ys)
+
+time_steps = 10
+X, y = create_dataset(X, y, time_steps)
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Build the LSTM model
+model = Sequential()
+model.add(LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(LSTM(50))
+model.add(Dense(1))
+
+model.compile(optimizer='adam', loss='mean_squared_error')
+
+# Train the model
+model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
+
+# Save the trained model
+model.save('stock_price_model.h5')
+
+print("Stock price prediction model training complete and saved to stock_price_model.h5")
+```
+
+### Step 2: Train the Second Model to Predict Uptrend or Downtrend
+
+#### Training Script for Second Model (`train_model_trend.py`):
 
 ```python
 import pandas as pd
@@ -18,40 +72,52 @@ import pickle
 # Load historical stock data
 data = pd.read_csv('historical_stock_data.csv')
 
-# Assuming the CSV has columns: 'open', 'high', 'low', 'close', 'volume'
-X = data[['open', 'high', 'low', 'volume']].values
+# Assuming the CSV has columns: 'close'
 y = data['close'].values
 
-# Split the data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Generate the target variable for trend (1 for uptrend, 0 for downtrend)
+def generate_trend(y, time_steps=10):
+    trend = []
+    for i in range(len(y) - time_steps):
+        if y[i + time_steps] > y[i]:
+            trend.append(1)
+        else:
+            trend.append(0)
+    return np.array(trend)
 
-# Standardize the data
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+time_steps = 10
+y_trend = generate_trend(y, time_steps)
+
+# Prepare the dataset for the trend model
+def create_dataset_for_trend(y, time_steps=10):
+    Xs = []
+    for i in range(len(y) - time_steps):
+        Xs.append(y[i:(i + time_steps)])
+    return np.array(Xs)
+
+X_trend = create_dataset_for_trend(y, time_steps)
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_trend, y_trend, test_size=0.2, random_state=42)
 
 # Build the ANN model
 model = Sequential()
 model.add(Dense(64, input_dim=X_train.shape[1], activation='relu'))
 model.add(Dense(64, activation='relu'))
-model.add(Dense(1))  # Output layer for regression
+model.add(Dense(1, activation='sigmoid'))
 
-model.compile(optimizer='adam', loss='mean_squared_error')
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
 # Train the model
 model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
 
-# Save the trained model and scaler
-model.save('stock_model.h5')
-with open('scaler.pkl', 'wb') as f:
-    pickle.dump(scaler, f)
+# Save the trained model
+model.save('stock_trend_model.h5')
 
-print("Model training complete and saved to stock_model.h5")
+print("Stock trend prediction model training complete and saved to stock_trend_model.h5")
 ```
 
-### Step 2: Set Up a TCP Server
-
-This server script generates synthetic stock data at one-minute intervals and sends it to connected clients via a TCP socket.
+### Step 3: Set Up a TCP Server
 
 #### Server Script (`server.py`):
 
@@ -114,9 +180,7 @@ if __name__ == "__main__":
     start_server()
 ```
 
-### Step 3: Set Up a TCP Client
-
-This client script connects to the server, receives real-time stock data, preprocesses it, and makes predictions using the trained ANN model.
+### Step 4: Set Up a TCP Client and Use Both Models
 
 #### Client Script (`client.py`):
 
@@ -124,13 +188,15 @@ This client script connects to the server, receives real-time stock data, prepro
 import socket
 import json
 import numpy as np
+import pandas as pd
 from tensorflow.keras.models import load_model
-import pickle
 
-# Load the trained model and scaler
-model = load_model('stock_model.h5')
-with open('scaler.pkl', 'rb') as f:
-    scaler = pickle.load(f)
+# Load the trained models
+price_model = load_model('stock_price_model.h5')
+trend_model = load_model('stock_trend_model.h5')
+
+# Create an empty DataFrame to store real-time data
+real_time_df = pd.DataFrame(columns=['timestamp', 'ticker', 'open', 'high', 'low', 'close', 'volume', 'predicted_close'])
 
 def start_client(host='localhost', port=65432):
     """
@@ -147,11 +213,27 @@ def start_client(host='localhost', port=65432):
 
             stock_data = json.loads(data.decode('utf-8').strip())
             features = np.array([[stock_data['open'], stock_data['high'], stock_data['low'], stock_data['volume']]])
-            features_scaled = scaler.transform(features)
-            prediction = model.predict(features_scaled)
+            features = features.reshape((1, 1, features.shape[1]))
+            price_prediction = price_model.predict(features)[0][0]
 
-            print(f"Received data: {stock_data}")
-            print(f"Predicted close price: {prediction[0][0]}")
+            # Add the received data and price prediction to the DataFrame
+            stock_data['predicted_close'] = price_prediction
+            real_time_df.loc[len(real_time_df)] = stock_data
+
+            # Use the last 10 days of predicted prices for trend prediction
+            if len(real_time_df) >= 10:
+                recent_prices = real_time_df['predicted_close'][-10:].values.reshape(1, -1)
+                trend_prediction = trend_model.predict(recent_prices)
+                trend = 'Uptrend' if trend_prediction[0][0] > 0.5 else 'Downtrend'
+
+                print(f"Received data: {stock_data}")
+                print(f"Predicted close price: {price_prediction}")
+                print(f"Predicted trend: {trend}")
+            else:
+                print(f"Received data: {stock_data}")
+                print(f"Predicted close price: {price_prediction}")
+                print("Insufficient data for trend prediction")
+
     finally:
         client_socket.close()
 
@@ -173,14 +255,6 @@ if __name__ == "__main__":
 
 ### Explanation
 
-- **Training Script**:
-  - Loads historical data, preprocesses it, and trains an ANN model.
-  - Saves the trained model and scaler for future use.
-
-- **Server Script**:
-  - Generates synthetic stock data at one-minute intervals and sends it to connected clients via TCP.
-
-- **Client Script**:
-  - Connects to the server, receives real-time stock data, preprocesses it, and makes predictions using the trained ANN model.
-
-This setup enables you to train an ANN model on historical data and test it on real-time data sent from a TCP server. The client script will print the received stock data and the predicted close price.
+- **First Model (Price Prediction)**:
+  - Loads historical data, preprocesses it, and trains an LSTM model to predict stock closing prices for the next 10 days.
+ 
