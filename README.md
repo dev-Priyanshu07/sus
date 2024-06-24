@@ -1,236 +1,119 @@
-Certainly! Let's switch the key exchange mechanism from Diffie-Hellman to RSA. RSA (Rivest–Shamir–Adleman) is an asymmetric encryption algorithm that uses a pair of keys: a public key for encryption and a private key for decryption.
+Certainly! Below is the complete code organized into different Python files based on their functionality. This modular approach makes it easier to manage and understand the code.
 
-### Overview
-
-In RSA, one party generates a pair of keys (public and private). The public key is shared with the other party, which uses it to encrypt a message. The private key, which is kept secret, is used to decrypt the message. This ensures secure communication.
-
-### Updated Modules
-
-We'll update the necessary modules to use RSA for key exchange and encryption/decryption.
-
-### File Structure
+### Folder Structure
 
 ```
-project/
+encryption_module/
 │
-├── analysis_engine.py
-├── derive.py
-├── exchange.py
-├── process.py
-├── security.py
-└── websocket_module/
-    └── websocket_client.py
+├── key_generation.py
+├── key_exchange.py
+├── data_encryption.py
+├── data_decryption.py
+└── main.py
 ```
 
-### `exchange.py`
-
-Handles RSA key generation, serialization, and shared secret computation.
-
-#### `exchange.py`
+### 1. `key_generation.py`
 
 ```python
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
+# key_generation.py
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
 
-# Step 1: Generate RSA private and public keys
+def generate_rsa_keys():
+    key = RSA.generate(2048)
+    private_key = key.export_key()
+    public_key = key.publickey().export_key()
+    return private_key, public_key
 
-# Generate RSA private key
-private_key = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048
-)
-
-# Extract the public key from the private key
-public_key = private_key.public_key()
-
-# Step 2: Serialize public key for sharing
-
-# Function to serialize the public key to bytes
-def get_serialized_public_key():
-    return public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-# Step 3: Deserialize received public key
-
-# Function to deserialize a received public key
-def load_peer_public_key(peer_public_key_bytes):
-    return serialization.load_pem_public_key(peer_public_key_bytes)
-
-# Step 4: Encrypt and decrypt shared secret
-
-# Function to encrypt data with a peer's public key
-def encrypt_with_peer_public_key(peer_public_key, data):
-    ciphertext = peer_public_key.encrypt(
-        data,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    return ciphertext
-
-# Function to decrypt data with our private key
-def decrypt_with_private_key(ciphertext):
-    plaintext = private_key.decrypt(
-        ciphertext,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    return plaintext
+def generate_aes_key():
+    return get_random_bytes(32)  # AES-256
 ```
 
-### `derive.py`
-
-Since RSA encryption is directly used for sharing secrets, we no longer need a key derivation function. This module can be omitted or kept for other cryptographic operations if needed.
-
-### `security.py`
-
-Contains functions for AES encryption, decryption, and DataFrame encryption/decryption.
-
-#### `security.py`
+### 2. `key_exchange.py`
 
 ```python
-import pandas as pd
+# key_exchange.py
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.PublicKey import RSA
+
+def encrypt_aes_key_with_rsa(aes_key, rsa_public_key):
+    rsa_key = RSA.import_key(rsa_public_key)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    encrypted_aes_key = cipher_rsa.encrypt(aes_key)
+    return encrypted_aes_key
+
+def decrypt_aes_key_with_rsa(encrypted_aes_key, rsa_private_key):
+    rsa_key = RSA.import_key(rsa_private_key)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    aes_key = cipher_rsa.decrypt(encrypted_aes_key)
+    return aes_key
+```
+
+### 3. `data_encryption.py`
+
+```python
+# data_encryption.py
+import json
 from Crypto.Cipher import AES
-import base64
+from Crypto.Util.Padding import pad
 
-def encrypt_data(data, key):
-    cipher = AES.new(key, AES.MODE_GCM)
-    nonce = cipher.nonce
-    ciphertext, tag = cipher.encrypt_and_digest(data.encode('utf-8'))
-    return nonce, ciphertext, tag
-
-def decrypt_data(nonce, ciphertext, tag, key):
-    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-    data = cipher.decrypt_and_verify(ciphertext, tag)
-    return data.decode('utf-8')
-
-def encrypt_dataframe(df, key):
-    encrypted_df = df.copy()
-    nonces = {}
-    tags = {}
-
-    for column in df.columns:
-        encrypted_values = []
-        column_nonces = []
-        column_tags = []
-        
-        for value in df[column]:
-            nonce, ciphertext, tag = encrypt_data(str(value), key)
-            encrypted_values.append(base64.b64encode(ciphertext).decode('utf-8'))
-            column_nonces.append(base64.b64encode(nonce).decode('utf-8'))
-            column_tags.append(base64.b64encode(tag).decode('utf-8'))
-        
-        encrypted_df[column] = encrypted_values
-        nonces[column] = column_nonces
-        tags[column] = column_tags
-
-    return encrypted_df, nonces, tags
-
-def decrypt_dataframe(encrypted_df, nonces, tags, key):
-    decrypted_df = encrypted_df.copy()
-
-    for column in encrypted_df.columns:
-        decrypted_values = []
-        
-        for encrypted_value, nonce, tag in zip(encrypted_df[column], nonces[column], tags[column]):
-            ciphertext = base64.b64decode(encrypted_value.encode('utf-8'))
-            nonce = base64.b64decode(nonce.encode('utf-8'))
-            tag = base64.b64decode(tag.encode('utf-8'))
-            decrypted_value = decrypt_data(nonce, ciphertext, tag, key)
-            decrypted_values.append(decrypted_value)
-        
-        decrypted_df[column] = decrypted_values
-
-    return decrypted_df
+def encrypt_json_data(data, aes_key):
+    json_data = json.dumps(data).encode('utf-8')
+    cipher_aes = AES.new(aes_key, AES.MODE_CBC)
+    ct_bytes = cipher_aes.encrypt(pad(json_data, AES.block_size))
+    return cipher_aes.iv, ct_bytes
 ```
 
-### `process.py`
-
-This file will now use RSA for key exchange, encryption, and decryption.
-
-#### `process.py`
+### 4. `data_decryption.py`
 
 ```python
-import asyncio
-import pandas as pd
-from websocket_module.websocket_client import receive_data
-import exchange
-import security
+# data_decryption.py
+import json
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
-async def handle_websocket(uri, analysis_func):
-    while True:
-        data = await receive_data(uri)
-        
-        # Convert the received data to a DataFrame
-        df = pd.read_csv(pd.compat.StringIO(data))
-        
-        # Simulate peer public key exchange
-        peer_public_key_bytes = exchange.get_serialized_public_key()
-        peer_public_key = exchange.load_peer_public_key(peer_public_key_bytes)
-        
-        # Encrypt the DataFrame
-        encrypted_df, nonces, tags = security.encrypt_dataframe(df, peer_public_key)
-        
-        # Convert encrypted DataFrame and metadata to JSON for transmission
-        encrypted_data = {
-            "encrypted_df": encrypted_df.to_json(),
-            "nonces": nonces,
-            "tags": tags
-        }
-        
-        # Send encrypted data to analysis module
-        analysis_func(encrypted_data, peer_public_key)
-
-def analysis_func(encrypted_data, key):
-    import analysis_engine
-    analysis_engine.process_encrypted_data(encrypted_data, key)
-
-if __name__ == "__main__":
-    uri = "wss://example.com/data"  # Replace with your WebSocket URI
-    asyncio.get_event_loop().run_until_complete(handle_websocket(uri, analysis_func))
+def decrypt_json_data(iv, encrypted_data, aes_key):
+    cipher_aes = AES.new(aes_key, AES.MODE_CBC, iv)
+    decrypted_data = unpad(cipher_aes.decrypt(encrypted_data), AES.block_size)
+    return json.loads(decrypted_data.decode('utf-8'))
 ```
 
-### `analysis_engine.py`
-
-Handles receiving encrypted data, decrypting it, and performing analysis.
-
-#### `analysis_engine.py`
+### 5. `main.py`
 
 ```python
-import pandas as pd
-import security
+# main.py
+from key_generation import generate_rsa_keys, generate_aes_key
+from key_exchange import encrypt_aes_key_with_rsa, decrypt_aes_key_with_rsa
+from data_encryption import encrypt_json_data
+from data_decryption import decrypt_json_data
 
-def process_encrypted_data(encrypted_data, key):
-    # Extract encrypted DataFrame and metadata
-    encrypted_df = pd.read_json(encrypted_data["encrypted_df"])
-    nonces = encrypted_data["nonces"]
-    tags = encrypted_data["tags"]
-    
-    # Decrypt the DataFrame
-    decrypted_df = security.decrypt_dataframe(encrypted_df, nonces, tags, key)
-    
-    # Perform further analysis
-    analysis_result = analyze_data(decrypted_df)
-    print("Analysis Result:", analysis_result)
+# 1. Generate RSA and AES keys
+private_key, public_key = generate_rsa_keys()
+aes_key = generate_aes_key()
 
-def analyze_data(df):
-    # Placeholder for actual analysis logic
-    return f"Analyzed DataFrame: {df}"
+# 2. Encrypt AES key using RSA public key
+encrypted_aes_key = encrypt_aes_key_with_rsa(aes_key, public_key)
+
+# 3. Encrypt JSON data using AES key
+data = {"result": "This is a test."}
+iv, encrypted_data = encrypt_json_data(data, aes_key)
+
+# 4. Decrypt AES key using RSA private key
+decrypted_aes_key = decrypt_aes_key_with_rsa(encrypted_aes_key, private_key)
+
+# 5. Decrypt JSON data using decrypted AES key
+decrypted_data = decrypt_json_data(iv, encrypted_data, decrypted_aes_key)
+
+print(decrypted_data)
 ```
 
-### Summary
+### Running the Code
 
-1. **`exchange.py`**: Handles RSA key generation, serialization, and encryption/decryption of the shared secret.
-2. **`security.py`**: Contains functions for AES encryption, decryption, and DataFrame encryption/decryption.
-3. **`process.py`**: Uses RSA for key exchange, encrypts the DataFrame, and sends encrypted data to `analysis_engine.py`.
-4. **`analysis_engine.py`**: Receives encrypted DataFrame, decrypts it, and performs analysis.
-5. **`websocket_module/websocket_client.py`**: Handles WebSocket connections and data reception.
+To run the code, navigate to the `encryption_module` directory and execute the `main.py` script:
 
-With RSA, the public and private keys are used for secure communication. The public key is used to encrypt the shared secret, and the private key is used to decrypt it. This setup ensures secure data exchange while keeping the column names intact for proper database storage and retrieval.
+```bash
+cd encryption_module
+python main.py
+```
+
+This will perform the key generation, key exchange, data encryption, and data decryption, printing the decrypted JSON data at the end.
