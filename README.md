@@ -1,72 +1,99 @@
-To handle the decryption of data within a `.js` file, you'll need to use appropriate libraries for RSA and AES decryption in JavaScript. In this example, I'll use the `node-forge` library, which provides comprehensive support for cryptographic operations in Node.js.
+You're right; if the RSA public key is constant and securely known by both the sender and the receiver, there's no need to transmit it with each payload. We can streamline the process by storing and reusing the public key and only transmitting the `encrypted_aes_key` and the `encrypted_data`.
 
-First, ensure you have `node-forge` installed in your project:
+### Step-by-Step Solution
 
-```bash
-npm install node-forge
-```
+#### 1. Generate and Save RSA Keys
 
-### Folder Structure
+First, generate and save the RSA key pair. This is a one-time setup step.
 
-```
-encryption_project/
-│
-├── encryption/
-│   ├── __init__.py
-│   ├── key_generation.py
-│   ├── key_exchange.py
-│   ├── data_encryption.py
-│   ├── data_decryption.py
-│
-├── encrypted_data.json
-├── main.py
-└── decrypt.js
-```
-
-### 1. Modify `main.py` to Save Encrypted Data to `encrypted_data.json`
+##### `generate_keys.py`
 
 ```python
-# main.py
-import json
-from encryption.key_generation import generate_rsa_keys, generate_aes_key
-from encryption.key_exchange import encrypt_aes_key_with_rsa, decrypt_aes_key_with_rsa
-from encryption.data_encryption import encrypt_json_data
-from encryption.data_decryption import decrypt_json_data
+from encryption.key_generation import generate_rsa_keys
 
-def main():
-    # 1. Generate RSA and AES keys
+def save_rsa_keys(private_key_file='private_key.pem', public_key_file='public_key.pem'):
     private_key, public_key = generate_rsa_keys()
-    aes_key = generate_aes_key()
 
-    # 2. Encrypt AES key using RSA public key
-    encrypted_aes_key = encrypt_aes_key_with_rsa(aes_key, public_key)
+    # Save the private key
+    with open(private_key_file, 'wb') as f:
+        f.write(private_key)
 
-    # 3. Encrypt JSON data using AES key
-    data = {"result": "This is a test."}
-    iv, encrypted_data = encrypt_json_data(data, aes_key)
-
-    # Save data to encrypted_data.json
-    encrypted_payload = {
-        'iv': iv.hex(),
-        'encrypted_data': encrypted_data.hex(),
-        'encrypted_aes_key': encrypted_aes_key.hex(),
-        'public_key': public_key.decode('utf-8'),
-        'private_key': private_key.decode('utf-8')  # Typically, you wouldn't share the private key like this
-    }
-
-    with open('encrypted_data.json', 'w') as f:
-        json.dump(encrypted_payload, f)
-
-    print("Encrypted data saved to encrypted_data.json")
+    # Save the public key
+    with open(public_key_file, 'wb') as f:
+        f.write(public_key)
 
 if __name__ == "__main__":
-    main()
+    save_rsa_keys()
 ```
 
-### 2. Create `decrypt.js` for Decryption
+Run this script once to generate and save the RSA keys:
+
+```bash
+python generate_keys.py
+```
+
+#### 2. Modify Encryption Script to Use Saved RSA Keys
+
+Update the encryption script to load the saved RSA public key and exclude it from the output payload.
+
+##### `encrypt.py`
+
+```python
+import json
+from encryption.key_generation import generate_aes_key
+from encryption.key_exchange import encrypt_aes_key_with_rsa
+from encryption.data_encryption import encrypt_json_data
+
+def load_public_key(public_key_file='public_key.pem'):
+    with open(public_key_file, 'rb') as f:
+        public_key = f.read()
+    return public_key
+
+def encrypt_json_values(data, aes_key):
+    encrypted_data = {}
+    for key, value in data.items():
+        iv, encrypted_value = encrypt_json_data({key: value}, aes_key)
+        encrypted_data[key] = {
+            'iv': iv.hex(),
+            'encrypted_value': encrypted_value.hex()
+        }
+    return encrypted_data
+
+def encrypt_data(data):
+    # Load the RSA public key
+    public_key = load_public_key()
+
+    # Generate AES key
+    aes_key = generate_aes_key()
+
+    # Encrypt AES key using RSA public key
+    encrypted_aes_key = encrypt_aes_key_with_rsa(aes_key, public_key)
+
+    # Encrypt only the values of the JSON data using AES key
+    encrypted_values = encrypt_json_values(data, aes_key)
+
+    # Prepare the encrypted payload
+    encrypted_payload = {
+        'encrypted_data': encrypted_values,
+        'encrypted_aes_key': encrypted_aes_key.hex()
+    }
+
+    return encrypted_payload
+
+if __name__ == "__main__":
+    # Assume result contains the data to be encrypted
+    result = {"result": "This is a test."}
+    encrypted_payload = encrypt_data(result)
+    print(json.dumps(encrypted_payload))
+```
+
+#### 3. Modify Decryption Script to Use Saved RSA Private Key
+
+Update the decryption script to load the saved RSA private key.
+
+##### `decrypt.js`
 
 ```javascript
-// decrypt.js
 const fs = require('fs');
 const forge = require('node-forge');
 
@@ -78,44 +105,71 @@ function hexToBytes(hex) {
   return bytes;
 }
 
-// Read the encrypted data
-const encryptedData = JSON.parse(fs.readFileSync('encrypted_data.json', 'utf8'));
+process.stdin.setEncoding('utf8');
 
-const { iv, encrypted_data, encrypted_aes_key, public_key, private_key } = encryptedData;
+let inputData = '';
 
-// Convert hex strings to byte arrays
-const ivBytes = hexToBytes(iv);
-const encryptedDataBytes = hexToBytes(encrypted_data);
-const encryptedAesKeyBytes = hexToBytes(encrypted_aes_key);
+process.stdin.on('data', (chunk) => {
+  inputData += chunk;
+});
 
-// Decrypt AES key with RSA private key
-const privateKeyForge = forge.pki.privateKeyFromPem(private_key);
-const aesKey = privateKeyForge.decrypt(forge.util.binary.raw.encode(encryptedAesKeyBytes), 'RSA-OAEP');
+process.stdin.on('end', () => {
+  const encryptedData = JSON.parse(inputData);
 
-// Decrypt the data with the AES key
-const decipher = forge.cipher.createDecipher('AES-CBC', aesKey);
-decipher.start({ iv: forge.util.createBuffer(ivBytes) });
-decipher.update(forge.util.createBuffer(encryptedDataBytes));
-decipher.finish();
-const decryptedData = decipher.output.toString('utf8');
+  const { encrypted_data, encrypted_aes_key } = encryptedData;
 
-// Parse and log the decrypted data
-console.log(JSON.parse(decryptedData));
+  // Load the private key from file
+  const privateKeyPem = fs.readFileSync('private_key.pem', 'utf8');
+  const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+
+  // Decrypt AES key with RSA private key
+  const encryptedAesKeyBytes = hexToBytes(encrypted_aes_key);
+  const aesKey = privateKey.decrypt(forge.util.binary.raw.encode(encryptedAesKeyBytes), 'RSA-OAEP');
+
+  // Decrypt the values with the AES key
+  const decryptedData = {};
+  for (const key in encrypted_data) {
+    const { iv, encrypted_value } = encrypted_data[key];
+    const ivBytes = hexToBytes(iv);
+    const encryptedValueBytes = hexToBytes(encrypted_value);
+
+    const decipher = forge.cipher.createDecipher('AES-CBC', aesKey);
+    decipher.start({ iv: forge.util.createBuffer(ivBytes) });
+    decipher.update(forge.util.createBuffer(encryptedValueBytes));
+    decipher.finish();
+
+    decryptedData[key] = JSON.parse(decipher.output.toString('utf8'))[key];
+  }
+
+  // Log the decrypted data
+  console.log(decryptedData);
+});
 ```
 
 ### Running the Code
 
-1. First, generate and save the encrypted data by running `main.py`:
+1. **Generate and Save RSA Keys (once):**
 
-```bash
-cd encryption_project
-python main.py
-```
+   ```bash
+   python generate_keys.py
+   ```
 
-2. Then, decrypt the data by running `decrypt.js`:
+2. **Encrypt the Data in Python:**
 
-```bash
-node decrypt.js
-```
+   Run the Python script to encrypt the data. This will output the encrypted payload to the standard output.
 
-This setup ensures that data encrypted in Python can be securely decrypted in JavaScript using Node.js, utilizing the RSA and AES algorithms for key exchange and data encryption.
+   ```bash
+   python encrypt.py > encrypted_payload.json
+   ```
+
+   If you want to pass the output directly to the Node.js script without saving it to a file, you can use a pipe:
+
+   ```bash
+   python encrypt.py | node decrypt.js
+   ```
+
+3. **Decrypt the Data in Node.js:**
+
+   The `decrypt.js` script reads the encrypted data from the standard input, so it can be directly piped from the Python script as shown above.
+
+By separating the key generation and usage steps, and by storing the RSA keys securely, you ensure that the same RSA public key is used for all encryption operations. This approach minimizes the overhead and ensures that only the necessary information (the encrypted AES key and the encrypted data) is transmitted each time.
