@@ -1,0 +1,111 @@
+If your encrypted data is structured such that each field (like `open`, `close`, etc.) has its own `encrypted_value` and `iv` (Initialization Vector) associated with it, here's how you can decrypt and display each field in JavaScript:
+
+### Example Structure of `encrypted_data`
+
+Assuming `parsedData` represents the parsed JSON object containing encrypted data:
+
+```javascript
+const parsedData = {
+  encrypted_data: {
+    stock1: {
+      open: {
+        encrypted_value: '...',  // Encrypted value of open
+        iv: '...'  // IV associated with open
+      },
+      close: {
+        encrypted_value: '...',  // Encrypted value of close
+        iv: '...'  // IV associated with close
+      },
+      // Additional fields...
+    },
+    stock2: {
+      open: {
+        encrypted_value: '...',  // Encrypted value of open for stock2
+        iv: '...'  // IV associated with open for stock2
+      },
+      close: {
+        encrypted_value: '...',  // Encrypted value of close for stock2
+        iv: '...'  // IV associated with close for stock2
+      },
+      // Additional fields...
+    },
+    // More stocks...
+  },
+  encrypted_aes_key: '...'  // Encrypted AES key
+};
+```
+
+### Decryption and Display Logic
+
+Here's how you can decrypt and display each field (`open`, `close`, etc.) for each stock:
+
+```javascript
+const forge = require('node-forge');
+
+// Example function to convert hexadecimal string to bytes
+function hexToBytes(hex) {
+  const bytes = [];
+  for (let c = 0; c < hex.length; c += 2) {
+    bytes.push(parseInt(hex.substr(c, 2), 16));
+  }
+  return bytes;
+}
+
+// Assume `parsedData` is the parsed JSON object containing encrypted data
+for (const stock in parsedData.encrypted_data) {
+  if (parsedData.encrypted_data.hasOwnProperty(stock)) {
+    console.log(`Stock: ${stock}`);
+    const stockData = parsedData.encrypted_data[stock];
+
+    // Decrypt each field (open, close, etc.) for the current stock
+    for (const field in stockData) {
+      if (stockData.hasOwnProperty(field)) {
+        const { encrypted_value, iv } = stockData[field];
+
+        // Convert iv from hexadecimal string to bytes
+        const ivBytes = hexToBytes(iv);
+
+        // Convert encrypted_value from hexadecimal string to bytes
+        const encryptedValueBytes = hexToBytes(encrypted_value);
+
+        // Create AES decipher object
+        const aesKey = '...';  // Replace with decrypted AES key
+        const decipher = forge.cipher.createDecipher('AES-CBC', aesKey);
+        decipher.start({ iv: forge.util.createBuffer(ivBytes) });
+        decipher.update(forge.util.createBuffer(encryptedValueBytes));
+        const success = decipher.finish();
+
+        // Handle decryption success or failure
+        if (success) {
+          const decryptedValue = decipher.output.toString('utf8');
+          console.log(`${field}: ${decryptedValue}`);
+        } else {
+          console.error(`Failed to decrypt ${field} for ${stock}`);
+        }
+      }
+    }
+    console.log(); // Add empty line for readability
+  }
+}
+```
+
+### Explanation:
+
+1. **Data Structure**:
+   - `parsedData.encrypted_data` contains entries for each stock (`stock1`, `stock2`, etc.), each with its own fields (`open`, `close`, etc.), where each field has `encrypted_value` and `iv`.
+
+2. **Decryption Process**:
+   - **Loop Through Stocks**:
+     - `for (const stock in parsedData.encrypted_data)` iterates over each stock (`stock1`, `stock2`, etc.).
+   - **Loop Through Fields**:
+     - `for (const field in stockData)` iterates over each field (`open`, `close`, etc.) for the current stock.
+   - **Decryption of Each Field**:
+     - `const { encrypted_value, iv } = stockData[field];` destructures `encrypted_value` and `iv` for the current field.
+     - Converts `iv` and `encrypted_value` from hexadecimal strings to bytes using `hexToBytes` function.
+     - Creates an AES decipher object (`decipher`) with the decrypted AES key (`aesKey`) and IV (`ivBytes`).
+     - Decrypts `encrypted_value` using `decipher` and retrieves the decrypted value (`decipher.output.toString('utf8')`).
+
+3. **Output**:
+   - Prints each decrypted field (`open`, `close`, etc.) for each stock to the console.
+
+This approach allows you to securely decrypt and display each field of encrypted data associated with stocks, ensuring that sensitive information remains protected during transmission and only accessible with the correct decryption keys. Adjust the AES key handling (`aesKey`) and error handling as per your application's specific requirements and security practices.
