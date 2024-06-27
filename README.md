@@ -173,3 +173,126 @@ process.stdin.on('end', () => {
    The `decrypt.js` script reads the encrypted data from the standard input, so it can be directly piped from the Python script as shown above.
 
 By separating the key generation and usage steps, and by storing the RSA keys securely, you ensure that the same RSA public key is used for all encryption operations. This approach minimizes the overhead and ensures that only the necessary information (the encrypted AES key and the encrypted data) is transmitted each time.
+
+
+
+
+
+
+
+
+
+Understood. Here's an updated version of the code where the RSA keys are generated once and reused. 
+
+### Python Code for Encryption
+
+```python
+import json
+import base64
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
+
+# RSA keys (generated once and reused)
+PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----"""
+PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+-----END PUBLIC KEY-----"""
+
+# Function to encrypt data using AES and RSA
+def encrypt_data(data, public_key):
+    # Generate a random AES key
+    aes_key = get_random_bytes(32)  # 256 bits for AES-256
+    cipher_aes = AES.new(aes_key, AES.MODE_EAX)
+    
+    # Encrypt the data with AES
+    ciphertext, tag = cipher_aes.encrypt_and_digest(json.dumps(data).encode('utf-8'))
+    
+    # Encrypt the AES key with the RSA public key
+    rsa_public_key = RSA.import_key(public_key)
+    cipher_rsa = PKCS1_OAEP.new(rsa_public_key)
+    enc_aes_key = cipher_rsa.encrypt(aes_key)
+    
+    # Combine encrypted AES key and ciphertext
+    encrypted_data = {
+        'enc_aes_key': base64.b64encode(enc_aes_key).decode('utf-8'),
+        'nonce': base64.b64encode(cipher_aes.nonce).decode('utf-8'),
+        'tag': base64.b64encode(tag).decode('utf-8'),
+        'ciphertext': base64.b64encode(ciphertext).decode('utf-8')
+    }
+    
+    return json.dumps(encrypted_data)
+
+# Example usage
+data = {'column1': 'value1', 'column2': 'value2'}
+encrypted_data = encrypt_data(data, PUBLIC_KEY)
+print(encrypted_data)
+```
+
+### JavaScript Code for Decryption
+
+```javascript
+const NodeRSA = require('node-rsa');
+const CryptoJS = require('crypto-js');
+
+// RSA private key (generated once and reused)
+const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----`;
+
+// Function to decrypt data using AES and RSA
+function decryptData(encryptedData, privateKey) {
+    // Parse the encrypted data
+    let data = JSON.parse(encryptedData);
+    
+    // Decode the base64 encoded values
+    let encAESKey = Buffer.from(data.enc_aes_key, 'base64');
+    let nonce = Buffer.from(data.nonce, 'base64');
+    let tag = Buffer.from(data.tag, 'base64');
+    let ciphertext = Buffer.from(data.ciphertext, 'base64');
+    
+    // Decrypt the AES key with the RSA private key
+    let key = new NodeRSA(privateKey);
+    let aesKey = key.decrypt(encAESKey, 'buffer');
+    
+    // Decrypt the data with AES
+    let decrypted = CryptoJS.AES.decrypt(
+        {
+            ciphertext: CryptoJS.lib.WordArray.create(ciphertext),
+            salt: CryptoJS.lib.WordArray.create(nonce),
+            iv: CryptoJS.lib.WordArray.create(tag)
+        },
+        aesKey.toString('base64'),
+        {
+            mode: CryptoJS.mode.EAX,
+            format: CryptoJS.format.OpenSSL,
+            padding: CryptoJS.pad.Pkcs7
+        }
+    );
+    
+    // Convert the decrypted data to a string and parse it as JSON
+    let decryptedData = CryptoJS.enc.Utf8.stringify(decrypted);
+    return JSON.parse(decryptedData);
+}
+
+// Example usage
+let encryptedData = `{
+    "enc_aes_key": "...",
+    "nonce": "...",
+    "tag": "...",
+    "ciphertext": "..."
+}`;
+
+let decryptedData = decryptData(encryptedData, PRIVATE_KEY);
+console.log(decryptedData);
+```
+
+### Notes:
+1. Replace the placeholder values (`MIIEowIBAAKCAQEA...`) in `PRIVATE_KEY` and `PUBLIC_KEY` with your actual RSA keys.
+2. Ensure the private key is securely stored and not exposed to the client side in a real-world application.
+3. The `pycryptodome` and `crypto-js` libraries are used for encryption and decryption.
+4. Handle the AES key and data encryption details correctly as per the AES mode used.
+
+With these updates, the RSA keys are generated once and reused for encryption and decryption, ensuring a consistent and secure key management approach.
