@@ -1,0 +1,118 @@
+encryption.js
+
+
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+from Crypto.Protocol.KDF import scrypt
+from Crypto.Util.Padding import pad, unpad
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+import json
+import base64
+
+# Generate AES key and IV (nonce)
+aes_key = get_random_bytes(32)
+iv = get_random_bytes(12)
+
+# Encrypt data using AES-256-GCM
+def encrypt_data(data, aes_key, iv):
+    cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
+    ciphertext, tag = cipher.encrypt_and_digest(data.encode())
+    return ciphertext, iv, tag
+
+data = {'message': 'Hello, World!'}
+plaintext = json.dumps(data)
+ciphertext, iv, tag = encrypt_data(plaintext, aes_key, iv)
+
+# Load RSA public key
+with open('public_key.pem', 'rb') as f:
+    rsa_key = RSA.import_key(f.read())
+
+# Encrypt AES key using RSA public key
+cipher_rsa = PKCS1_OAEP.new(rsa_key)
+enc_aes_key = cipher_rsa.encrypt(aes_key)
+
+# Prepare JSON object to save to file
+encrypted_data = {
+    'encryptedData': base64.b64encode(ciphertext).decode(),
+    'encryptedKey': base64.b64encode(enc_aes_key).decode(),
+    'nonce': base64.b64encode(iv).decode(),
+    'tag': base64.b64encode(tag).decode()
+}
+
+# Save encrypted data to a file
+with open('encrypted_data.json', 'w') as file:
+    json.dump(encrypted_data, file)
+
+print('Encrypted data saved to encrypted_data.json')
+
+
+
+Decryption.js
+const fs = require('fs');
+const forge = require('node-forge');
+
+// RSA private key (on server side, reuse this key)
+const privateKeyPem = `x`;
+
+// Load the private key
+const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+
+// Function to decrypt AES key using RSA private key
+function decryptAESKey(encryptedKey) {
+  // Convert base64-encoded encryptedKey to a byte buffer
+  const encryptedKeyBytes = forge.util.decode64(encryptedKey);
+
+  // Decrypt using RSA-OAEP (RSAES-OAEP with SHA-1 and MGF1-SHA-1)
+  const aesKey = privateKey.decrypt(encryptedKeyBytes, 'RSA-OAEP', {
+    md: forge.md.sha1.create(),
+    mgf1: {
+      md: forge.md.sha1.create()
+    }
+  });
+
+  return aesKey;
+}
+
+// Function to decrypt data using AES-256-GCM
+function decryptAES256GCM(encryptedData, aesKey, iv, tag) {
+  // Convert base64-encoded inputs to byte buffers
+  const encryptedBytes = forge.util.decode64(encryptedData);
+  const ivBytes = forge.util.decode64(iv);
+  const tagBytes = forge.util.decode64(tag);
+
+  // Create AES-GCM decipher
+  const decipher = forge.cipher.createDecipher('AES-GCM', aesKey);
+  decipher.start({ iv: ivBytes, tag: tagBytes });
+  decipher.update(forge.util.createBuffer(encryptedBytes));
+  const success = decipher.finish();
+
+  if (success) {
+    return decipher.output.toString();
+  } else {
+    throw new Error('Decryption failed');
+  }
+}
+
+// Function to decrypt the received JSON data from file
+function decryptDataFromFile() {
+  try {
+    const encryptedData = JSON.parse(fs.readFileSync('encrypted_data.json', 'utf8'));
+
+    const { encryptedData: encryptedDataStr, encryptedKey, nonce, tag } = encryptedData;
+
+    // Decrypt the AES key using RSA private key
+    const aesKey = decryptAESKey(encryptedKey);
+
+    // Decrypt the data using the decrypted AES key
+    const decryptedData = decryptAES256GCM(encryptedDataStr, aesKey, nonce, tag);
+    console.log('Decrypted Data:', decryptedData);
+  } catch (err) {
+    console.error('Error reading or decrypting the data:', err);
+  }
+}
+
+// Example usage: Call the function to decrypt data from file
+decryptDataFromFile();
+
+
