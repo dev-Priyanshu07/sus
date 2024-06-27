@@ -383,3 +383,26 @@ try {
     - The decryption process checks if the decryption was successful and throws an error if it fails.
 
 This setup replaces `CryptoJS` with `forge` for the decryption process in JavaScript, ensuring that the decryption logic matches the encryption logic in Python.
+
+
+from Crypto.PublicKey import RSA
+
+def generate_key_pair():
+    key = RSA.generate(2048)  # Generate 2048-bit RSA key
+
+    # Save private key
+    private_key = key.export_key()
+    with open("private_key.pem", "wb") as f:
+        f.write(private_key)
+
+    # Save public key
+    public_key = key.publickey().export_key()
+    with open("public_key.pem", "wb") as f:
+        f.write(public_key)
+
+    print("RSA key pair generated successfully.")
+    print("Private key saved to 'private_key.pem'")
+    print("Public key saved to 'public_key.pem'")
+
+if __name__ == "__main__":
+    generate_key_pair()
