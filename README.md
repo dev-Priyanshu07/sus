@@ -296,3 +296,90 @@ console.log(decryptedData);
 4. Handle the AES key and data encryption details correctly as per the AES mode used.
 
 With these updates, the RSA keys are generated once and reused for encryption and decryption, ensuring a consistent and secure key management approach.
+
+
+Sure! Here’s how you can replace the `CryptoJS` library with `forge` in the JavaScript decryption function. First, you need to install the `node-forge` library:
+
+```bash
+npm install node-forge
+```
+
+Here's the updated JavaScript code using `node-forge`:
+
+### JavaScript Code for Decryption with `node-forge`
+
+```javascript
+const NodeRSA = require('node-rsa');
+const forge = require('node-forge');
+
+// RSA private key (generated once and reused)
+const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----`;
+
+// Function to decrypt data using AES and RSA
+function decryptData(encryptedData, privateKey) {
+    // Parse the encrypted data
+    let data = JSON.parse(encryptedData);
+    
+    // Decode the base64 encoded values
+    let encAESKey = forge.util.decode64(data.enc_aes_key);
+    let nonce = forge.util.decode64(data.nonce);
+    let tag = forge.util.decode64(data.tag);
+    let ciphertext = forge.util.decode64(data.ciphertext);
+    
+    // Decrypt the AES key with the RSA private key
+    let key = new NodeRSA(privateKey);
+    let aesKey = key.decrypt(encAESKey, 'buffer');
+    
+    // Convert AES key to forge format
+    let aesKeyForge = forge.util.createBuffer(aesKey, 'binary');
+    
+    // Decrypt the data with AES
+    let decipher = forge.cipher.createDecipher('AES-GCM', aesKeyForge);
+    decipher.start({ iv: nonce, tag: forge.util.createBuffer(tag, 'binary') });
+    decipher.update(forge.util.createBuffer(ciphertext, 'binary'));
+    let success = decipher.finish();
+    
+    if (!success) {
+        throw new Error('Decryption failed');
+    }
+    
+    // Convert the decrypted data to a string and parse it as JSON
+    let decryptedData = decipher.output.toString('utf8');
+    return JSON.parse(decryptedData);
+}
+
+// Example usage
+let encryptedData = `{
+    "enc_aes_key": "...",
+    "nonce": "...",
+    "tag": "...",
+    "ciphertext": "..."
+}`;
+
+try {
+    let decryptedData = decryptData(encryptedData, PRIVATE_KEY);
+    console.log(decryptedData);
+} catch (error) {
+    console.error('Error decrypting data:', error);
+}
+```
+
+### Explanation
+
+1. **Decoding Base64**:
+    - The `forge.util.decode64` method is used to decode the base64 encoded values for the encrypted AES key, nonce, tag, and ciphertext.
+
+2. **RSA Decryption**:
+    - The AES key is decrypted using the RSA private key with the `node-rsa` library.
+
+3. **AES Decryption**:
+    - The decrypted AES key is used to create a decipher in `forge`.
+    - The nonce and tag are used as parameters for the `AES-GCM` mode in `forge`.
+    - The ciphertext is decrypted using the `forge` AES decipher.
+
+4. **Error Handling**:
+    - The decryption process checks if the decryption was successful and throws an error if it fails.
+
+This setup replaces `CryptoJS` with `forge` for the decryption process in JavaScript, ensuring that the decryption logic matches the encryption logic in Python.
